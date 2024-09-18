@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package avsv1;
+
+option go_package = "yourproject/avsv1";
+
+service TaskSubmissionService {
+  rpc SubmitTask(SubmitTaskRequest) returns (SubmitTaskResponse) {}
+}
+
+message SubmitTaskRequest {
+  Task task = 1;
+}
+
+message SubmitTaskResponse {
+  string task_id = 1;
+  string status = 2;
+}
+
+message Task {
+  string id = 1;
+  Params params = 2;
+}
+
+message Params {
+  repeated bytes to = 1;
+  repeated bytes from = 2;
+  bytes data = 3;
+  bytes value = 4;
+  uint32 quorum_threshold_count = 5;
+  string policy_id = 6;
+  uint64 block_expiration = 7;
+  repeated string api_keys = 8;
+}
