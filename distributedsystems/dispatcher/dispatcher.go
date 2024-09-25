@@ -17,10 +17,7 @@ import (
 )
 
 type TransactionRequest struct {
-	To    string `json:"to"`
-	From  string `json:"from"`
-	Data  string `json:"data"`
-	Value string `json:"value"`
+	TransactionID string `json:"transaction_id"`
 }
 
 func failOnError(err error, msg string) {
