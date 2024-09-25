@@ -78,8 +78,6 @@ func handleConcurrent(w http.ResponseWriter, r *http.Request) {
 	// Wait for all goroutines to complete
 	wg.Wait()
 
-	
-
 	fmt.Println("all goroutines complete")
 	fmt.Println(results)
 }

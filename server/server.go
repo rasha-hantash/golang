@@ -56,8 +56,7 @@ func handleConcurrent(w http.ResponseWriter, r *http.Request) {
 	time.Sleep(time.Second * 3)
 	w.(http.Flusher).Flush()
 	fmt.Println("flushed!")
-	
-	
+
 	// time.Sleep(time.Second * 10)
 	wg.Wait()
 	fmt.Println("all goroutines complete")

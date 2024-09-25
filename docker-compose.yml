@@ -1,7 +1,20 @@
-version: '3'
+version: '3.8'
+
 services:
-  api:
-    build: .
-    scale: 25
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    hostname: rabbitmq
     ports:
-      - "50051"
+      - "5672:5672"  # AMQP protocol port
+      - "15672:15672"  # Management UI port
+    environment:
+      - RABBITMQ_DEFAULT_USER=your_username
+      - RABBITMQ_DEFAULT_PASS=your_password
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    restart: unless-stopped
+
+volumes:
+  rabbitmq_data:
+    name: rabbitmq_data

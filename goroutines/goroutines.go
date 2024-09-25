@@ -14,7 +14,7 @@ func main() {
 	defer parentCancel()
 
 	var wg sync.WaitGroup
-	
+
 	// Create a channel to synchronize printing
 	printChan := make(chan string)
 
@@ -30,10 +30,10 @@ func main() {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			
+
 			// Simulate some work
 			duration := time.Duration(rand.Intn(8000)) * time.Millisecond
-			
+
 			select {
 			case <-time.After(duration):
 				printChan <- fmt.Sprintf("Goroutine %d completed after %v", id, duration)
