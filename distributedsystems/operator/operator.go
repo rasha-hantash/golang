@@ -6,8 +6,9 @@ import (
 	"log"
 	"math/rand"
 	"time"
+	"context"
 
-	"github.com/streadway/amqp"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func failOnError(err error, msg string) {
@@ -41,8 +42,10 @@ func main() {
 	// )
 	// failOnError(err, "Failed to set QoS")
 
+	ctx := context.Background()
 	transactionQueue := "transaction_requests"
-	msgs, err := ch.Consume(
+	msgs, err := ch.ConsumeWithContext(
+		ctx,
 		"transaction_requests", // queue
 		"",               // consumer
 		false,            // auto-ack
@@ -57,17 +60,16 @@ func main() {
 
 	forever := make(chan bool)
 
-	go func() {
+	go func(ctx context.Context) {
 		for d := range msgs {
-			processTransaction(d, ch)
-			d.Ack(false)
+			processTransaction(ctx, d, ch)
+			d.Ack(false) // todo look into more of this 
 		}
-	}()
-
+	}(ctx)
 	<-forever
 }
 
-func processTransaction(d amqp.Delivery, ch *amqp.Channel) {
+func processTransaction(ctx context.Context, d amqp.Delivery, ch *amqp.Channel) {
 	var tx Transaction
 	err := json.Unmarshal(d.Body, &tx)
 	if err != nil {
@@ -93,22 +95,30 @@ func processTransaction(d amqp.Delivery, ch *amqp.Channel) {
 		return
 	}
 
-	// // Create a unique response queue for this transaction
-	// _, err = s.rabbitMQChan.QueueDeclare(
-	// 	d.CorrelationId,    // name (empty string means a random unique name will be generated)
-	// 	false, // durable
-	// 	false, // delete when unused
-	// 	true,  // exclusive
-	// 	false, // no-wait
-	// 	nil,   // arguments
-	// )
-	// if err != nil {
-	// 	// http.Error(w, "Failed to create response queue", http.StatusInternalServerError)
-	// 	// todo modify this
-	// 	return
-	// }
+	// Create a unique response queue for this transaction
+	_, err = ch.QueueDeclare(
+		d.CorrelationId,    // name (empty string means a random unique name will be generated)
+		false, // durable
+		false, // delete when unused
+		true,  // exclusive
+		false, // no-wait
+		amqp.Table{
+			"x-expires": 10000, // 10 seconds in milliseconds
+		},   // arguments
+	)
+	if err != nil {
+		// http.Error(w, "Failed to create response queue", http.StatusInternalServerError)
+		// todo modify this
+		return
+	}
 
-	err = ch.Publish(
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+    defer cancel()
+	
+
+	err = ch.PublishWithContext(
+		ctx,
 		"",        // exchange
 		d.CorrelationId, // routing key (queue name)
 		false,     // mandatory

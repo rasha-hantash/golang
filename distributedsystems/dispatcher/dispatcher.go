@@ -12,7 +12,7 @@ import (
 
 	"time"
 
-	"github.com/streadway/amqp"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/segmentio/ksuid"
 )
 
@@ -59,7 +59,9 @@ func main() {
 		false,                  // delete when unused
 		false,                  // exclusive
 		false,                  // no-wait
-		nil,                    // arguments
+		amqp.Table{
+			"x-expires": 10000, // 10 seconds in milliseconds
+		},                    // arguments
 	)
 	failOnError(err, "Failed to declare transactions queue")
 
@@ -141,23 +143,23 @@ func (s *server) ValidateTransaction(w http.ResponseWriter, r *http.Request) {
 
 	// Create a unique response queue for this transaction
 	responseQueue, err := s.rabbitMQChan.QueueDeclare(
-		transactionID,    // name (empty string means a random unique name will be generated)
+		transactionID,    // queue name
 		false, // durable
 		false, // delete when unused
 		true,  // exclusive
 		false, // no-wait
-		nil,   // arguments
+		amqp.Table{
+			"x-expires": 10000, // 10 seconds in milliseconds
+		},
 	)
 	if err != nil {
 		http.Error(w, "Failed to create response queue", http.StatusInternalServerError)
 		return
 	}
 
-	fmt.Println(responseQueue.Name)
-
 	// Publish the transaction to RabbitMQ
 	err = s.rabbitMQChan.Publish(
-		"fanout",                 // exchange
+		"fanout",           // exchange
 		s.transactionQueue, // routing key (queue name)
 		false,              // mandatory
 		false,              // immediate
@@ -193,7 +195,7 @@ func (s *server) ValidateTransaction(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) collectResponses(ctx context.Context, queueName, correlationID string) (bool, error) {
 	responseChan, err := s.rabbitMQChan.Consume(
-		queueName, // queue
+		correlationID, // queue
 		"",        // consumer
 		true,      // auto-ack
 		false,     // exclusive
