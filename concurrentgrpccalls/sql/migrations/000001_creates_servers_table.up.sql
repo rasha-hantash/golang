@@ -1,0 +1,6 @@
+  
+  CREATE TABLE IF NOT EXISTS servers (
+    id SERIAL PRIMARY KEY,
+    host_ip_and_port VARCHAR(50) UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

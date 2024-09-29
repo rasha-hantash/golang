@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package health;
+
+option go_package = "github.com/rasha-hantash/golang/concurrentgrpccalls/proto/v1";
+
+service HealthService {
+  rpc SubmitHealth (HealthRequest) returns (HealthResponse) {}
+}
+
+message HealthRequest {
+  string client_id = 1;
+}
+
+message HealthResponse {
+  string status = 1;
+}
