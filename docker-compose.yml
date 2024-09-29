@@ -1,5 +1,4 @@
-version: '3.8'
-
+version: '3'
 services:
   rabbitmq:
     image: rabbitmq:3-management
@@ -14,6 +13,19 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     restart: unless-stopped
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 10s
+      retries: 3
+  api:
+    build: .
+    scale: 25
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "50051"
 
 volumes:
   rabbitmq_data:

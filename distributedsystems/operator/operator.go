@@ -1,12 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"math/rand"
 	"time"
-	"context"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -17,14 +18,16 @@ func failOnError(err error, msg string) {
 	}
 }
 
-type Transaction struct {
-	// Add fields as per your transaction structure
-	ID string `json:"id"`
-	// ... other fields
+type TransactionRequest struct {
+	TransactionID string `json:"transaction_id"`
+	TxnHash       string `json:"txn_hash"`
+	From          string `json:"from"`
+	To            string `json:"to"`
+	Value         int64    `json:"value"` // amount sent from the sender to the receiver
 }
 
 func main() {
-	connectionString := "amqp://guest:guest@localhost:5672/"
+	connectionString := "amqp://your_username:your_password@rabbitmq:5672/"
 
 	conn, err := amqp.Dial(connectionString)
 	failOnError(err, "Failed to connect to RabbitMQ")
@@ -43,10 +46,41 @@ func main() {
 	// failOnError(err, "Failed to set QoS")
 
 	ctx := context.Background()
-	transactionQueue := "transaction_requests"
+
+	err = ch.ExchangeDeclare(
+		"transaction_requests",   // name
+		"fanout", // type
+		true,     // durable
+		false,    // auto-deleted
+		false,    // internal
+		false,    // no-wait
+		nil,      // arguments
+	)
+	failOnError(err, "Failed to declare an exchange")
+
+	q, err := ch.QueueDeclare(
+			"",    // name
+			false, // durable
+			false, // delete when unused
+			true,  // exclusive
+			false, // no-wait
+			nil,   // arguments
+	)
+	failOnError(err, "Failed to declare a queue")
+
+	err = ch.QueueBind(
+			q.Name, // queue name
+			"",     // routing key
+			"transaction_requests", // exchange
+			false,
+			nil,
+	)
+	failOnError(err, "Failed to bind a queue")
+
+	failOnError(err, "Failed to declare transactions queue")
 	msgs, err := ch.ConsumeWithContext(
 		ctx,
-		"transaction_requests", // queue
+		q.Name, // queue
 		"",               // consumer
 		false,            // auto-ack
 		false,            // exclusive
@@ -56,7 +90,7 @@ func main() {
 	)
 	failOnError(err, "Failed to register a consumer")
 
-	fmt.Printf("Operator is waiting for messages on queue: %s. To exit press CTRL+C\n", transactionQueue)
+	fmt.Printf("Operator is waiting for messages on queue: transaction_requests. To exit press CTRL+C\n", )
 
 	forever := make(chan bool)
 
@@ -70,8 +104,8 @@ func main() {
 }
 
 func processTransaction(ctx context.Context, d amqp.Delivery, ch *amqp.Channel) {
-	var tx Transaction
-	err := json.Unmarshal(d.Body, &tx)
+	var txnRequest TransactionRequest
+	err := json.Unmarshal(d.Body, &txnRequest)
 	if err != nil {
 		log.Printf("Error decoding transaction: %v", err)
 		return
@@ -81,10 +115,11 @@ func processTransaction(ctx context.Context, d amqp.Delivery, ch *amqp.Channel) 
 	time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
 
 	// Simulate validation (replace with actual validation logic)
-	isValid := rand.Float32() < 0.8 // 80% chance of being valid
+	isValid := rand.Float32() < 0.9 // 80% chance of being valid
 
+	slog.InfoContext(ctx, "Processing transaction", "transaction_id", txnRequest.TransactionID, "is_valid", isValid)
 	response := map[string]interface{}{
-		"transaction_id": tx.ID,
+		"transaction_id": txnRequest.TransactionID,
 		"is_valid":       isValid,
 		// Add any other relevant response data
 	}
@@ -96,21 +131,21 @@ func processTransaction(ctx context.Context, d amqp.Delivery, ch *amqp.Channel) 
 	}
 
 	// Create a unique response queue for this transaction
-	_, err = ch.QueueDeclare(
-		d.CorrelationId,    // name (empty string means a random unique name will be generated)
-		false, // durable
-		false, // delete when unused
-		true,  // exclusive
-		false, // no-wait
-		amqp.Table{
-			"x-expires": 10000, // 10 seconds in milliseconds
-		},   // arguments
-	)
-	if err != nil {
-		// http.Error(w, "Failed to create response queue", http.StatusInternalServerError)
-		// todo modify this
-		return
-	}
+	// _, err = ch.QueueDeclare(
+	// 	txnRequest.TransactionID,    // name (empty string means a random unique name will be generated)
+	// 	false, // durable
+	// 	false, // delete when unused
+	// 	true,  // exclusive
+	// 	false, // no-wait
+	// 	amqp.Table{
+	// 		"x-expires": 10000, // 10 seconds in milliseconds
+	// 	},   // arguments
+	// )
+	// if err != nil {
+	// 	// http.Error(w, "Failed to create response queue", http.StatusInternalServerError)
+	// 	// todo modify this
+	// 	return
+	// }
 
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -120,18 +155,18 @@ func processTransaction(ctx context.Context, d amqp.Delivery, ch *amqp.Channel) 
 	err = ch.PublishWithContext(
 		ctx,
 		"",        // exchange
-		d.CorrelationId, // routing key (queue name)
+		txnRequest.TransactionID, // routing key (queue name)
 		false,     // mandatory
 		false,     // immediate
 		amqp.Publishing{
 			ContentType:   "application/json",
-			CorrelationId: d.CorrelationId,
+			// CorrelationId: d.CorrelationId,
 			Body:          responseBody,
 		})
 
 	if err != nil {
 		log.Printf("Error publishing response: %v", err)
 	} else {
-		log.Printf("Published response for transaction %s", tx.ID)
+		log.Printf("Published response for transaction %s", txnRequest.TransactionID)
 	}
 }

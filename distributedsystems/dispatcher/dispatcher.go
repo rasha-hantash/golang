@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"log"
-	"net/http"
-	"github.com/gorilla/mux"
-	"golang.org/x/time/rate"
-	"io"
 	"encoding/json"
 	"fmt"
+	"github.com/gorilla/mux"
+	"golang.org/x/time/rate"
+	"log/slog"
+	"log"
+	"net/http"
 
 	"time"
 
@@ -18,6 +18,15 @@ import (
 
 type TransactionRequest struct {
 	TransactionID string `json:"transaction_id"`
+	TxnHash       string `json:"txn_hash"`
+	From          string `json:"from"`
+	To            string `json:"to"`
+	Value         int64    `json:"value"` // amount sent from the sender to the receiver
+}
+
+type TransactionResponse struct {
+	TransactionID string `json:"transaction_id"`
+	IsValid   bool   `json:"is_valid"`
 }
 
 func failOnError(err error, msg string) {
@@ -27,18 +36,14 @@ func failOnError(err error, msg string) {
 }
 
 type server struct {
-	rabbitMQConn   *amqp.Connection
-	rabbitMQChan   *amqp.Channel
-	responseQueue  amqp.Queue
-	transactionQueue string
+	rabbitMQConn     *amqp.Connection
+	rabbitMQChan     *amqp.Channel
 }
 
-func newServer(conn *amqp.Connection, ch *amqp.Channel, respQueue amqp.Queue, transQueue string) *server {
+func newServer(conn *amqp.Connection, ch *amqp.Channel) *server {
 	return &server{
-		rabbitMQConn:   conn,
-		rabbitMQChan:   ch,
-		responseQueue:  respQueue,
-		transactionQueue: transQueue,
+		rabbitMQConn:     conn,
+		rabbitMQChan:     ch,
 	}
 }
 
@@ -52,52 +57,53 @@ func main() {
 	failOnError(err, "Failed to open a channel")
 	defer ch.Close()
 
-	// Declare the transactions queue
-	transQueue, err := ch.QueueDeclare(
-		"transaction_requests", // name
-		false,                  // durable
-		false,                  // delete when unused
-		false,                  // exclusive
-		false,                  // no-wait
-		amqp.Table{
-			"x-expires": 10000, // 10 seconds in milliseconds
-		},                    // arguments
+	err = ch.ExchangeDeclare(
+		"transaction_requests",   // name
+		"fanout", // type
+		true,     // durable
+		false,    // auto-deleted
+		false,    // internal
+		false,    // no-wait
+		nil,      // arguments
 	)
-	failOnError(err, "Failed to declare transactions queue")
+	failOnError(err, "Failed to declare an exchange")
 
-	// Declare the response queue
-	respQueue, err := ch.QueueDeclare(
-		"transaction_responses",    // name (empty string means a random unique name will be generated)
-		false, // durable
-		false, // delete when unused
-		true,  // exclusive
-		false, // no-wait
-		nil,   // arguments
-	)
-	failOnError(err, "Failed to declare response queue")
+	// // Declare the transactions queue
+	// transQueue, err := ch.QueueDeclare(
+	// 	"transaction_requests", // name
+	// 	false,                  // durable
+	// 	false,                  // delete when unused
+	// 	false,                  // exclusive
+	// 	false,                  // no-wait
+	// 	nil,                    // arguments
+	// )
+	// failOnError(err, "Failed to declare transactions queue")
 
 	// Create a new server instance
-	s := newServer(conn, ch, respQueue, transQueue.Name)
+	s := newServer(conn, ch)
 
 	// Initialize and start the gateway
 	router := mux.NewRouter()
 
 	// Initialize rate limiter
-	limiter := rate.NewLimiter(rate.Limit(2), 10) // 2 requests per second, allow bursts up to 10
+	// limiter := rate.NewLimiter(rate.Limit(2), 10) // 2 requests per second, allow bursts up to 10
 
 	// Add rate limiter middleware
-	router.Use(rateLimiterMiddleware(limiter))
+	// router.Use(rateLimiterMiddleware(limiter))
 
 	// Add health check endpoint
 	router.HandleFunc("/health", healthCheckHandler).Methods("GET")
 
 	// Add your routes here, for example:
-	router.HandleFunc("/validate_transaction", s.ValidateTransaction).Methods("POST")
+	router.HandleFunc("/transaction", s.BroadcastTransaction).Methods("POST")
 
+	// Define the port
+	port := "8080"
 	// Start the HTTP server
-	log.Fatal(http.ListenAndServe(":8080", router))
+	// Start the HTTP server
+	log.Printf("Server is now listening on :%s\n", port)
+	log.Fatal(http.ListenAndServe(":"+port, router))
 }
-
 
 func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
@@ -116,7 +122,7 @@ func rateLimiterMiddleware(limiter *rate.Limiter) func(http.Handler) http.Handle
 	}
 }
 
-func (s *server) ValidateTransaction(w http.ResponseWriter, r *http.Request) {
+func (s *server) BroadcastTransaction(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), time.Second*5)
 	defer cancel()
 
@@ -125,56 +131,57 @@ func (s *server) ValidateTransaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read the entire body
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		http.Error(w, "Error reading request body", http.StatusInternalServerError)
-		return
-	}
-	defer r.Body.Close()
-
-	// Check if the body is empty
-	if len(body) == 0 {
-		http.Error(w, "Request body is empty", http.StatusBadRequest)
+	// Attempt to unmarshal the body into the TransactionRequest struct
+	var txnRequest TransactionRequest
+	// Decode JSON directly from the request body
+	if err := json.NewDecoder(r.Body).Decode(&txnRequest); err != nil {
+		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	transactionID := fmt.Sprintf("txn_%s", ksuid.New().String())
-
+	// Generate and set the TransactionID
+	txnID := fmt.Sprintf("txn_%s", ksuid.New().String())
+	txnRequest.TransactionID = txnID
 	// Create a unique response queue for this transaction
 	responseQueue, err := s.rabbitMQChan.QueueDeclare(
-		transactionID,    // queue name
-		false, // durable
-		false, // delete when unused
-		true,  // exclusive
-		false, // no-wait
-		amqp.Table{
-			"x-expires": 10000, // 10 seconds in milliseconds
-		},
+		txnID, // queue name
+		false,         // durable
+		false,         // delete when unused
+		true,          // exclusive
+		false,         // no-wait
+		nil,           // arguments
 	)
 	if err != nil {
 		http.Error(w, "Failed to create response queue", http.StatusInternalServerError)
 		return
 	}
 
+
+	txnRequestByte, err := json.Marshal(txnRequest)
+	if err != nil {
+		http.Error(w, "Failed to marshal transaction request", http.StatusInternalServerError)
+		return
+	}
+
 	// Publish the transaction to RabbitMQ
-	err = s.rabbitMQChan.Publish(
-		"fanout",           // exchange
-		s.transactionQueue, // routing key (queue name)
+	err = s.rabbitMQChan.PublishWithContext(
+		ctx,
+		"transaction_requests",           // exchange
+		"", // routing key (queue name)
 		false,              // mandatory
 		false,              // immediate
 		amqp.Publishing{
 			ContentType:   "application/json",
-			CorrelationId: transactionID,
-			// ReplyTo:       responseQueue.Name,
-			Body:          body,
+			// CorrelationId: txnRequest.TransactionID,
+			// ReplyTo:       responseQueue.Name, // todo look into what this does
+			Body: txnRequestByte,
 		})
 	if err != nil {
 		http.Error(w, "Failed to publish message", http.StatusInternalServerError)
 		return
 	}
 
-	isCompliant, err := s.collectResponses(ctx, responseQueue.Name, transactionID)
+	isCompliant, err := s.collectResponses(ctx, responseQueue.Name, txnID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -192,16 +199,16 @@ func (s *server) ValidateTransaction(w http.ResponseWriter, r *http.Request) {
 	w.Write(jsonResponse)
 }
 
-
-func (s *server) collectResponses(ctx context.Context, queueName, correlationID string) (bool, error) {
+func (s *server) collectResponses(ctx context.Context, queueName, transactionID string) (bool, error) {
+	slog.InfoContext(ctx, "collecting responses for transaction", "transaction_id", transactionID)
 	responseChan, err := s.rabbitMQChan.Consume(
-		correlationID, // queue
-		"",        // consumer
-		true,      // auto-ack
-		false,     // exclusive
-		false,     // no-local
-		false,     // no-wait
-		nil,       // args
+		transactionID, // queue
+		"",            // consumer
+		true,          // auto-ack
+		false,         // exclusive
+		false,         // no-local
+		false,         // no-wait
+		nil,           // args
 	)
 	if err != nil {
 		return false, fmt.Errorf("failed to set up response channel: %v", err)
@@ -211,8 +218,19 @@ func (s *server) collectResponses(ctx context.Context, queueName, correlationID 
 	for {
 		select {
 		case response := <-responseChan:
-			if response.CorrelationId == correlationID {
-				responses++
+			if response.RoutingKey == transactionID {
+				
+				var txnResponse TransactionResponse
+				err := json.Unmarshal(response.Body, &txnResponse)
+				if err != nil {
+					return false, fmt.Errorf("failed to unmarshal response: %v", err)
+				}
+
+				slog.InfoContext(ctx, "received response", "transaction_id", transactionID, "is_valid", txnResponse.IsValid)
+
+				if txnResponse.IsValid {
+					responses++
+				}
 				if responses >= 5 {
 					// Delete the queue after receiving 5 responses
 					_, err := s.rabbitMQChan.QueueDelete(queueName, false, false, false)
