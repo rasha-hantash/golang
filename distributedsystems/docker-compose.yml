@@ -18,7 +18,9 @@ services:
       interval: 10s
       timeout: 10s
       retries: 3
-  gi
+  api:    
+    build: .    
+    scale: 25
     depends_on:
       rabbitmq:
         condition: service_healthy

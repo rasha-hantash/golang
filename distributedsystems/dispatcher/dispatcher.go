@@ -120,10 +120,10 @@ func (s *Server) BroadcastTransaction(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createResponseQueue(txnID string) (amqp.Queue, error) {
 	return s.rabbitMQChan.QueueDeclare(
-		txnID,
-		false,
-		false,
-		true,
+		txnID, // name
+		false, // durable
+		false, // auto delete
+		true,  // exclusive -> important to ensure that no one else can recieve responses from this transaction responses queue 
 		false,
 		nil,
 	)
