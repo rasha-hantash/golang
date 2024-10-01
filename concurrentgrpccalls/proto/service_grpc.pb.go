@@ -4,7 +4,7 @@
 // - protoc             v4.25.1
 // source: proto/service.proto
 
-package v1
+package proto
 
 import (
 	context "context"
@@ -19,7 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	HealthService_SubmitHealth_FullMethodName = "/health.HealthService/SubmitHealth"
+	HealthService_SubmitHealth_FullMethodName = "/proto.HealthService/SubmitHealth"
 )
 
 // HealthServiceClient is the client API for HealthService service.
@@ -96,7 +96,7 @@ func _HealthService_SubmitHealth_Handler(srv interface{}, ctx context.Context, d
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var HealthService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "health.HealthService",
+	ServiceName: "proto.HealthService",
 	HandlerType: (*HealthServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

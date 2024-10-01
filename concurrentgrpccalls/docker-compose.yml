@@ -23,24 +23,42 @@ services:
       postgres:
         condition: service_healthy
     command: >
-      bash -c "
-        psql -h postgres -U postgres -d postgres -f /migrations/up.sql
+     bash -c "
+        for file in /migrations/*.up.sql; do
+          psql -h postgres -U postgres -d postgres -f $$file
+        done
       "
     environment:
-      PG_PASSWORD: postgres
+      PGPASSWORD: postgres
 
   server:
     build:
-      context: ./server
-      dockerfile: Dockerfile
+      dockerfile: ./server/server.Dockerfile
     scale: 25
     depends_on:
       migrations:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50051"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_NAME: postgres
+  client:
+    build:
+      dockerfile: ./client/client.Dockerfile
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      SERVER_HOST: server
+      SERVER_PORT: 50051
+    ports:
+      - "50051:50051"
     

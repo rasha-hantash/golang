@@ -9,7 +9,9 @@ import (
     "fmt"
 
     "google.golang.org/grpc"
-    pb "github.com/rasha-hantash/golang/concurrentgrpccalls/proto"
+    "google.golang.org/grpc/health"
+    healthpb "google.golang.org/grpc/health/grpc_health_v1"
+    proto "github.com/rasha-hantash/golang/concurrentgrpccalls/proto"
 )
 
 
@@ -34,12 +36,12 @@ func getOutboundIP() string {
 }
 
 type server struct {
-    pb.UnimplementedHealthServiceServer
+    proto.UnimplementedHealthServiceServer
 }
 
-func (s *server) SubmitHealth(ctx context.Context, in *pb.HealthRequest) (*pb.HealthResponse, error) {
+func (s *server) SubmitHealth(ctx context.Context, in *proto.HealthRequest) (*proto.HealthResponse, error) {
     log.Printf("Received health check from client: %v", in.GetClientId())
-    return &pb.HealthResponse{Status: "OK"}, nil
+    return &proto.HealthResponse{Status: "OK"}, nil
 }
 
 func main() {
@@ -89,7 +91,12 @@ func main() {
         log.Fatalf("failed to listen: %v", err)
     }
     s := grpc.NewServer()
-    pb.RegisterHealthServiceServer(s, &server{})
+    proto.RegisterHealthServiceServer(s, &server{})
+
+    // Register the health service
+    healthServer := health.NewServer()
+    healthpb.RegisterHealthServer(s, healthServer)
+
     log.Printf("Server listening at %v", lis.Addr())
     if err := s.Serve(lis); err != nil {
         log.Fatalf("failed to serve: %v", err)
