@@ -1,4 +1,4 @@
-module github.com/rasha-hantash/golang
+module github.com/rasha-hantash/golang/distributedsystems
 
 go 1.23.1
 
