@@ -4,7 +4,7 @@ WORKDIR /app
 COPY . .
 RUN go mod download && go mod tidy
 # Change working directory to where the Go files are
-WORKDIR /app/distributedsystems/operator
+WORKDIR /app/operator
 # Build the operator
 RUN go build -v -o /usr/local/bin/operator
 
