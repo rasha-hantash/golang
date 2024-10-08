@@ -8,6 +8,10 @@ import (
 	"log/slog"
 	"math/rand"
 	"time"
+	"net/http"
+	"bytes"
+	"io"
+	"github.com/spf13/viper"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -30,8 +34,13 @@ type TransactionProcessor struct {
 	ch   *amqp.Channel
 }
 
-func NewTransactionProcessor(connectionString string) (*TransactionProcessor, error) {
-	conn, err := amqp.Dial(connectionString)
+func NewTransactionProcessor(connectionString, auth0Token string) (*TransactionProcessor, error) {
+	// Create a custom dialer that includes the OAuth2 token
+	conn, err := amqp.DialConfig(connectionString, amqp.Config{
+		Heartbeat: 10 * time.Second,
+		Locale:    "en_US",
+		SASL:      []amqp.Authentication{&amqp.PlainAuth{Username: "", Password: auth0Token}},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to RabbitMQ: %w", err)
 	}
@@ -49,19 +58,6 @@ func NewTransactionProcessor(connectionString string) (*TransactionProcessor, er
 }
 
 func (tp *TransactionProcessor) Setup() error {
-	err := tp.ch.ExchangeDeclare(
-		"transaction_requests",
-		"fanout",
-		true,
-		false,
-		false,
-		false,
-		nil,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to declare an exchange: %w", err)
-	}
-
 	q, err := tp.ch.QueueDeclare(
 		"",
 		false,
@@ -74,6 +70,8 @@ func (tp *TransactionProcessor) Setup() error {
 		return fmt.Errorf("failed to declare a queue: %w", err)
 	}
 
+	// todo check to see if i can create the same transaction_requests exchange 
+	// and txn_{id} that dispatcher creates
 	err = tp.ch.QueueBind(
 		q.Name,
 		"",
@@ -89,6 +87,7 @@ func (tp *TransactionProcessor) Setup() error {
 }
 
 func (tp *TransactionProcessor) ProcessTransactions(ctx context.Context) error {
+	// how 
 	msgs, err := tp.ch.ConsumeWithContext(
 		ctx,
 		"",
@@ -171,9 +170,20 @@ func (tp *TransactionProcessor) Close() {
 }
 
 func main() {
-	connectionString := "amqp://your_username:your_password@rabbitmq:5672/"
+	viper.SetConfigFile("../.env")
+    err := viper.ReadInConfig()
+    if err != nil {
+        fmt.Printf("Error reading config file: %s\n", err)
+    }
 
-	processor, err := NewTransactionProcessor(connectionString)
+	auth0Token, err := getAuth0Token()
+	if err != nil {
+		log.Fatal(err)
+	}
+	// todo put the rabbitmq hostname in env var
+	connectionString := "amqp://localhost@localhost:5672/"
+
+	processor, err := NewTransactionProcessor(connectionString, auth0Token)
 	if err != nil {
 		log.Fatalf("Failed to create transaction processor: %v", err)
 	}
@@ -190,4 +200,55 @@ func main() {
 	if err := processor.ProcessTransactions(ctx); err != nil {
 		log.Fatalf("Error processing transactions: %v", err)
 	}
+}
+
+
+func getAuth0Token() (string, error) {
+	url  := viper.GetString("AUTH0_DOMAIN") + "/oauth/token"
+	payload := map[string]string{
+		"client_id":     viper.GetString("DISPATCHER_AUTH0_CLIENT_ID"),
+		"client_secret": viper.GetString("DISPATCHER_AUTH0_CLIENT_SECRET"),
+		"audience":      "rabbitmq",
+		"grant_type":    "client_credentials",
+	}
+
+
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("error marshaling payload: %v", err)
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return "", fmt.Errorf("error creating request: %v", err)
+	}
+
+	req.Header.Add("Content-Type", "application/json")
+
+	client := &http.Client{}
+	res, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("error sending request: %v", err)
+	}
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return "", fmt.Errorf("error reading response body: %v", err)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status code: %d, body: %s", res.StatusCode, string(body))
+	}
+
+	var tokenResponse struct {
+		AccessToken string `json:"access_token"`
+	}
+
+	err = json.Unmarshal(body, &tokenResponse)
+	if err != nil {
+		return "", fmt.Errorf("error unmarshaling response: %v", err)
+	}
+
+	return tokenResponse.AccessToken, nil
 }

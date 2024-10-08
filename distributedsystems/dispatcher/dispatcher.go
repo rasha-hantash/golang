@@ -8,11 +8,14 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+	"io"
+	"bytes"
 
 	"github.com/gorilla/mux"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/segmentio/ksuid"
 	"golang.org/x/time/rate"
+	"github.com/spf13/viper"
 )
 
 type TransactionRequest struct {
@@ -53,23 +56,94 @@ func (s *Server) routes() {
 }
 
 func main() {
+	viper.SetConfigFile("../.env")
+    err := viper.ReadInConfig()
+    if err != nil {
+        fmt.Printf("Error reading config file: %s\n", err)
+    }
+
+
 	conn, ch := initRabbitMQ()
 	defer conn.Close()
 	defer ch.Close()
 
 	server := NewServer(conn, ch)
 
-	port := "8080"
+	port := "8081"
 	log.Printf("Server is now listening on :%s\n", port)
 	log.Fatal(http.ListenAndServe(":"+port, server.router))
 }
 
-func initRabbitMQ() (*amqp.Connection, *amqp.Channel) {
-	conn, err := amqp.Dial("amqp://your_username:your_password@localhost:5672/")
-	failOnError(err, "Failed to connect to RabbitMQ")
+func getAuth0Token() (string, error) {
+	url  := viper.GetString("AUTH0_DOMAIN") + "/oauth/token"
+	
+	payload := map[string]string{
+		"client_id":     viper.GetString("DISPATCHER_AUTH0_CLIENT_ID"),
+		"client_secret": viper.GetString("DISPATCHER_AUTH0_CLIENT_SECRET"),
+		"audience":      "rabbitmq",
+		"grant_type":    "client_credentials",
+	}
 
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("error marshaling payload: %v", err)
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return "", fmt.Errorf("error creating request: %v", err)
+	}
+
+	req.Header.Add("Content-Type", "application/json")
+
+	client := &http.Client{}
+	res, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("error sending request: %v", err)
+	}
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return "", fmt.Errorf("error reading response body: %v", err)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status code: %d, body: %s", res.StatusCode, string(body))
+	}
+
+	var tokenResponse struct {
+		AccessToken string `json:"access_token"`
+	}
+
+	err = json.Unmarshal(body, &tokenResponse)
+	if err != nil {
+		return "", fmt.Errorf("error unmarshaling response: %v", err)
+	}
+
+	return tokenResponse.AccessToken, nil
+}
+
+func initRabbitMQ() (*amqp.Connection, *amqp.Channel) {
+	auth0Token, err := getAuth0Token()
+	if err != nil {
+		log.Fatalf("Error getting token: %v", err)
+	}
+
+	// RabbitMQ connection parameters
+	rabbitmqURL := "amqp://localhost:5672" // Replace with your actual RabbitMQ host if different
+
+	// Create a custom dialer that includes the OAuth2 token
+	conn, err := amqp.DialConfig(rabbitmqURL, amqp.Config{
+		Heartbeat: 10 * time.Second,
+		Locale:    "en_US",
+		SASL:      []amqp.Authentication{&amqp.PlainAuth{Username: "", Password: auth0Token}},
+	})
+	failOnError(err, "Failed to open a connection")
+	fmt.Println("Successfully connected to RabbitMQ")
 	ch, err := conn.Channel()
 	failOnError(err, "Failed to open a channel")
+	
 
 	err = ch.ExchangeDeclare(
 		"transaction_requests",
@@ -100,6 +174,7 @@ func (s *Server) BroadcastTransaction(w http.ResponseWriter, r *http.Request) {
 
 	responseQueue, err := s.createResponseQueue(txnID)
 	if err != nil {
+		log.Println(err)
 		http.Error(w, "Failed to create response queue", http.StatusInternalServerError)
 		return
 	}

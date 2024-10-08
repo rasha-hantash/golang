@@ -1,0 +1,12 @@
+auth_backends.1 = rabbit_auth_backend_oauth2
+
+log.console.level = info
+
+management.oauth_enabled = true
+management.oauth_client_id = RABBITMQ_AUTH0_CLIENT_ID
+management.oauth_scopes = openid profile rabbitmq.read:*/* rabbitmq.write:*/* rabbitmq.configure:*/*
+
+auth_oauth2.resource_server_id = rabbitmq
+auth_oauth2.additional_scopes_key = permissions
+auth_oauth2.issuer = AUTH0_DOMAIN
+auth_oauth2.https.hostname_verification = wildcard
