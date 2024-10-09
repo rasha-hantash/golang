@@ -54,3 +54,7 @@ variable "dispatcher_count" {
 variable "rabbitmq_count" {
   description = "Number of RabbitMQ tasks to run"
 }
+
+variable "environment" {
+  description = "Secrets for the Platform API in ${var.environment} environment"
+}
