@@ -1,9 +1,11 @@
 package config
 
-import ( 
+import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/secretsmanager"
@@ -19,7 +21,7 @@ type Config struct {
 }
 
 
-func LoadConfig() (*Config, error) {
+func LoadConfig(ctx context.Context) (*Config, error) {
 	env := os.Getenv("ENVIRONMENT")
 	if env == "" {
 		env = "local"

@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
+	"log/slog"
+	"os"
 
-	"github.com/rasha-hantash/golang/distributedsystems/operator/config"
 	"github.com/rasha-hantash/golang/distributedsystems/libs/auth"
+	"github.com/rasha-hantash/golang/distributedsystems/operator/config"
 	"github.com/rasha-hantash/golang/distributedsystems/operator/rabbitmq"
+	"github.com/rasha-hantash/golang/distributedsystems/libs/logger"
 )
 
 
@@ -15,7 +17,14 @@ import (
 
 
 func main() {
-	cfg , err := config.LoadConfig()
+
+	// load configuration 
+	h := &logger.ContextHandler{Handler: slog.NewJSONHandler(os.Stdout, nil)}
+	slog.SetDefault(slog.New(h))
+    ctx := logger.AppendCtx(context.Background(), slog.String("request_id", "req-123"))
+
+
+	cfg , err := config.LoadConfig(ctx)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
@@ -31,21 +40,21 @@ func main() {
 			Audience:     "rabbitmq",
 		},
 	}
-	rabbitmqSvc, err := rabbitmq.NewConnection(rabbitCfg)
-	if err != nil {
-		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
-	}
+	rabbitmqSvc := rabbitmq.NewConnection(rabbitCfg)
 	defer rabbitmqSvc.Close()
 
 	if err := rabbitmqSvc.Setup(); err != nil {
 		log.Fatalf("Failed to set up processor: %v", err)
 	}
 
-	ctx := context.Background()
+	slog.InfoContext(ctx, "operator service is now listening for messages")
 
-	fmt.Println("Transaction processor is waiting for messages. To exit press CTRL+C")
 
 	if err := rabbitmqSvc.ProcessTransactions(ctx); err != nil {
+		slog.ErrorContext(ctx, "Error processing transactions", "error", err.Error())
 		log.Fatalf("Error processing transactions: %v", err)
 	}
 }
+
+// todo: set up identity pool and iam for the operator service
+// todo: fix logging with slog

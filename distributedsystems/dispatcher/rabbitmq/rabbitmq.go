@@ -49,7 +49,6 @@ func NewConnection(rabbitmqCfg RabbitMQConfig) (*RabbitMQService, error) {
 	}
 
 	rabbitmqURL := fmt.Sprintf("amqp://%s:5672", rabbitmqCfg.Host)
-
 	// Create a custom dialer that includes the OAuth2 token
 	conn, err := amqp.DialConfig(rabbitmqURL, amqp.Config{
 		Heartbeat: 10 * time.Second,
@@ -81,6 +80,7 @@ func NewConnection(rabbitmqCfg RabbitMQConfig) (*RabbitMQService, error) {
 
 func (rmq *RabbitMQService) BroadcastTransaction(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), time.Second*5)
+	slog.InfoContext(ctx, "broadcasting transaction")
 	defer cancel()
 
 	var txnRequest TransactionRequest
@@ -94,7 +94,7 @@ func (rmq *RabbitMQService) BroadcastTransaction(w http.ResponseWriter, r *http.
 
 	responseQueue, err := rmq.createResponseQueue(txnID)
 	if err != nil {
-		log.Println(err)
+		slog.ErrorContext(ctx, "error creating response queue","error", err.Error())
 		http.Error(w, "Failed to create response queue", http.StatusInternalServerError)
 		return
 	}
@@ -174,21 +174,21 @@ func (rmq *RabbitMQService) collectResponses(ctx context.Context, queueName, tra
 					responses++
 				}
 				if responses >= 5 {
-					rmq.deleteQueue(queueName)
+					rmq.deleteQueue(ctx, queueName)
 					return true, nil
 				}
 			}
 		case <-ctx.Done():
-			rmq.deleteQueue(queueName)
+			rmq.deleteQueue(ctx, queueName)
 			return false, nil
 		}
 	}
 }
 
-func (rmq *RabbitMQService) deleteQueue(queueName string) {
+func (rmq *RabbitMQService) deleteQueue(ctx context.Context, queueName string) {
 	_, err := rmq.rabbitMQChan.QueueDelete(queueName, false, false, false)
 	if err != nil {
-		log.Printf("Failed to delete queue %s: %v", queueName, err)
+		slog.ErrorContext(ctx, "failed to delete queue", "queueName", queueName, "error",err)
 	}
 }
 

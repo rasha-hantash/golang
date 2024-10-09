@@ -42,11 +42,9 @@ type RabbitMQConfig struct {
 
 
 
-func NewConnection(rabbitmqCfg RabbitMQConfig) (*RabbitMQService, error) {
+func NewConnection(rabbitmqCfg RabbitMQConfig) (*RabbitMQService) {
 	auth0Token, err := auth.GetAuth0Token(rabbitmqCfg.Auth0Config)
-	if err != nil {
-		log.Fatalf("Error getting token: %v", err)
-	}
+	failOnError(err, "Error getting token")
 
 	rabbitmqURL := fmt.Sprintf("amqp://%s:5672", rabbitmqCfg.Host)
 
@@ -63,7 +61,7 @@ func NewConnection(rabbitmqCfg RabbitMQConfig) (*RabbitMQService, error) {
 	return &RabbitMQService{
 		rabbitMQConn: conn,
 		rabbitMQChan:   ch,
-	}, nil
+	}
 
 }
 
@@ -123,7 +121,7 @@ func (rmq *RabbitMQService) ProcessTransactions(ctx context.Context) error {
 func (rmq *RabbitMQService) processTransaction(ctx context.Context, d amqp.Delivery) {
 	var txnRequest TransactionRequest
 	if err := json.Unmarshal(d.Body, &txnRequest); err != nil {
-		log.Printf("Error decoding transaction: %v", err)
+		slog.ErrorContext(ctx, "error decoding transaction", "error", err.Error())
 		return
 	}
 
@@ -144,9 +142,9 @@ func (rmq *RabbitMQService) processTransaction(ctx context.Context, d amqp.Deliv
 	}
 
 	if err := rmq.publishResponse(ctx, response); err != nil {
-		log.Printf("Error publishing response: %v", err)
+		slog.ErrorContext(ctx, "error publishing response", "error", err.Error())
 	} else {
-		log.Printf("Published response for transaction %s", txnRequest.TransactionID)
+		slog.InfoContext(ctx, "published response for transaction", "transaction_id", txnRequest.TransactionID)
 	}
 }
 

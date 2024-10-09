@@ -1,10 +1,11 @@
 package config
 
-
-import ( 
+import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/secretsmanager"
@@ -13,13 +14,13 @@ import (
 type Config struct {
 	Environment          string `json:"ENVIRONMENT"`
 	Auth0Domain          string `json:"AUTH0_DOMAIN"`
-	OperatorClientID   string `json:"DISPATCHER_AUTH0_CLIENT_ID"`
-	OperatorClientSecret string `json:"DISPATCHER_AUTH0_CLIENT_SECRET"`
+	OperatorClientID   string `json:"OPERATOR_AUTH0_CLIENT_ID"`
+	OperatorClientSecret string `json:"OPERATOR_AUTH0_CLIENT_SECRET"`
 	RabbitMQHost         string `json:"RABBITMQ_HOST"`
 	// Add any other configuration fields you need
 }
 
-func LoadConfig() (*Config, error) {
+func LoadConfig(ctx context.Context) (*Config, error) {
 	env := os.Getenv("ENVIRONMENT")
 	if env == "" {
 		env = "local"
@@ -63,3 +64,5 @@ func LoadConfig() (*Config, error) {
 
 	return &config, nil
 }
+
+// todo pass in context into loadconfig
