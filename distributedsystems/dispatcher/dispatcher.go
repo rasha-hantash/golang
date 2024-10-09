@@ -44,6 +44,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
 	}
+	defer rabbitmqSvc.Close()
 
 	s := NewServer(rabbitmqSvc)
 

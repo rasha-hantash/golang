@@ -198,6 +198,11 @@ func failOnError(err error, msg string) {
 	}
 }
 
+func (rmq *RabbitMQService) Close() {
+	rmq.rabbitMQChan.Close()
+	rmq.rabbitMQConn.Close()
+}
+
 func sendJSONResponse(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(data); err != nil {
