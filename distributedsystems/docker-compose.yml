@@ -18,14 +18,14 @@ services:
       interval: 10s
       timeout: 10s
       retries: 3
-  operator:    
-    build: ./docker/Dockerfile.operator    
-    scale: 25
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-    ports:
-      - "50051"
+  # operator:    
+  #   build: ./docker/Dockerfile.operator    
+  #   scale: 25
+  #   depends_on:
+  #     rabbitmq:
+  #       condition: service_healthy
+  #   ports:
+  #     - "50051"
 
 volumes:
   rabbitmq_data:

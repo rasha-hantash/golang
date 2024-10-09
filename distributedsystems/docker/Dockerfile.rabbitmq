@@ -1,4 +1,4 @@
-FROM rabbitmq:3-management
+FROM rabbitmq:4-management
 
 # Enable RabbitMQ OAuth2 plugin
 RUN rabbitmq-plugins enable rabbitmq_auth_backend_oauth2
@@ -8,6 +8,7 @@ COPY rabbitmq.conf /etc/rabbitmq/rabbitmq.conf
 
 # Expose ports
 EXPOSE 5672 15672
+
 
 # Set the command
 CMD ["rabbitmq-server"]

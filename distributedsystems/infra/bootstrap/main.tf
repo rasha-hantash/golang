@@ -1,10 +1,10 @@
 terraform {
- required_providers {
-   aws = {
-     source  = "hashicorp/aws"
-     version = "5.50.0"
-   }
- }
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "5.50.0"
+    }
+  }
 }
 
 provider "aws" {
@@ -13,7 +13,7 @@ provider "aws" {
 
 # Create ECR repository
 resource "aws_ecr_repository" "platform" {
-  name                 = "platform"
+  name                 = "${var.environment}-platform"
   image_tag_mutability = "MUTABLE"
 
   image_scanning_configuration {
@@ -33,6 +33,7 @@ resource "aws_secretsmanager_secret" "dispatcher_config" {
 
 resource "aws_secretsmanager_secret_version" "dispatcher_config_version" {
   secret_id     = aws_secretsmanager_secret.dispatcher_config.id
+  secret_string = jsonencode({}) # Empty JSON object
 }
 
 # Create AWS Secrets Manager secret for operator config
@@ -46,6 +47,7 @@ resource "aws_secretsmanager_secret" "operator_config" {
 
 resource "aws_secretsmanager_secret_version" "operator_config_version" {
   secret_id     = aws_secretsmanager_secret.operator_config.id
+  secret_string = jsonencode({}) # Empty JSON object
 }
 
 

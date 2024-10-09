@@ -29,4 +29,5 @@ todo
 - look into tls certifications with rabbit mq 
 - todo look more into how i would deploy this via tf 
 - todo look into jsut deploying this based on new docker image 
+- todo look into what buldx does 
 
