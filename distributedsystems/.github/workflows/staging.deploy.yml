@@ -1,7 +1,5 @@
 name: CI/CD Pipeline
-# create release for staging and production
-# with ability to pus hto the correct ecr registry
-# likely create my own ecr registry first not through terraform
+# create release for staging
 on:
   push:
     branches: [ main ]
