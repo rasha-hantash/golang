@@ -55,7 +55,7 @@ func main() {
 	defer rabbitmqSvc.Close()
 
 	s := NewServer(rabbitmqSvc)
-	port := "8081" // todo maybe put this in an env var? 
+	port := "80" // todo maybe put this in an env var? 
 	slog.InfoContext(ctx, "server is now listening", slog.String("port", port))
 	log.Fatal(http.ListenAndServe(":"+port, s.router)) // todo add host no? 
 }

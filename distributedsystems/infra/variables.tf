@@ -19,18 +19,6 @@ variable "private_subnet_cidr" {
   description = "CIDR block for the private subnet"
 }
 
-variable "dispatcher_image" {
-  description = "Docker image for the Dispatcher"
-}
-
-variable "dispatcher_image_tag" {
-  description = "Tag for the Dispatcher Docker image"
-}
-
-variable "rabbitmq_image" {
-  description = "Docker image for RabbitMQ"
-}
-
 variable "dispatcher_cpu" {
   description = "CPU units for Dispatcher task"
 }
@@ -55,6 +43,23 @@ variable "rabbitmq_count" {
   description = "Number of RabbitMQ tasks to run"
 }
 
-variable "environment" {
-  description = "Secrets for the Platform API in ${var.environment} environment"
+variable "my_ip" {
+  description = "Rasha's IP address"
+  type        = string
+}
+
+variable "dispatcher_image" {
+  description = "Docker image for the Dispatcher"
+}
+
+variable "dispatcher_image_tag" {
+  description = "Tag for the Dispatcher Docker image"
+}
+
+variable "rabbitmq_image" {
+  description = "Docker image for RabbitMQ"
+}
+
+variable "rabbitmq_image_tag" {
+  description = "Tag for the RabbitMQ Docker image"
 }

@@ -1,10 +1,14 @@
 terraform {
- required_providers {
-   aws = {
-     source  = "hashicorp/aws"
-     version = "5.50.0"
-   }
- }
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "5.50.0"
+    }
+  }
+}
+
+locals {
+  environment = terraform.workspace
 }
 
 # Provider configuration
@@ -17,7 +21,7 @@ resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
   enable_dns_support   = true
-  
+
   tags = {
     Name = "${var.project_name}-vpc"
   }
@@ -38,9 +42,9 @@ resource "aws_subnet" "public" {
   cidr_block              = var.public_subnet_cidr
   availability_zone       = "${var.aws_region}a"
   map_public_ip_on_launch = true
-  
+
   tags = {
-    Name = "${var.project_name}-public-subnet"
+    Name = "${local.environment}-${var.project_name}-public-subnet"
   }
 }
 
@@ -49,9 +53,9 @@ resource "aws_subnet" "private" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = var.private_subnet_cidr
   availability_zone = "${var.aws_region}b"
-  
+
   tags = {
-    Name = "${var.project_name}-private-subnet"
+    Name = "${local.environment}-${var.project_name}-private-subnet"
   }
 }
 
@@ -90,9 +94,41 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private.id
 }
 
+
 # ECS Cluster
 resource "aws_ecs_cluster" "main" {
-  name = "${var.project_name}-cluster"
+  name = "${local.environment}-${var.project_name}-cluster"
+}
+
+resource "aws_iam_role" "ecs_task_role" {
+  name = "${var.project_name}-ecs-task-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_role_policy" {
+  role       = aws_iam_role.ecs_task_role.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess"
+}
+
+resource "aws_cloudwatch_log_group" "ecs_logs" {
+  name              = "/ecs/${var.project_name}"
+  retention_in_days = 30 # Adjust as needed
+
+  tags = {
+    Name = "${var.project_name}-ecs-logs"
+  }
 }
 
 # ECS Task Definition for Dispatcher
@@ -113,6 +149,14 @@ resource "aws_ecs_task_definition" "dispatcher" {
           hostPort      = 80
         }
       ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.ecs_logs.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "dispatcher"
+        }
+      }
     }
   ])
 }
@@ -139,6 +183,14 @@ resource "aws_ecs_task_definition" "rabbitmq" {
           hostPort      = 15672
         }
       ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.ecs_logs.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "rabbitmq"
+        }
+      }
     }
   ])
 }
@@ -216,7 +268,6 @@ resource "aws_lb_target_group" "rabbitmq" {
     unhealthy_threshold = "3"
   }
 }
-
 # Security Group for Dispatcher
 resource "aws_security_group" "dispatcher" {
   name        = "${var.project_name}-dispatcher-sg"
@@ -224,11 +275,20 @@ resource "aws_security_group" "dispatcher" {
   vpc_id      = aws_vpc.main.id
 
   egress {
-    from_port       = 5672
-    to_port         = 5672
-    protocol        = "tcp"
-    security_groups = [aws_security_group.rabbitmq.id]
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
+}
+
+resource "aws_security_group_rule" "dispatcher_inbound_80" {
+  type              = "ingress"
+  from_port         = 80
+  to_port           = 80
+  protocol          = "tcp"
+  cidr_blocks       = ["${var.my_ip}/32"]
+  security_group_id = aws_security_group.dispatcher.id
 }
 
 # Security Group for RabbitMQ
@@ -238,10 +298,10 @@ resource "aws_security_group" "rabbitmq" {
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    from_port       = 5672
-    to_port         = 5672
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id, aws_security_group.dispatcher.id]
+    from_port   = 5672
+    to_port     = 5672
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr] # Allow incoming connections from within the VPC
   }
 
   egress {
@@ -252,7 +312,17 @@ resource "aws_security_group" "rabbitmq" {
   }
 }
 
-# Security Group for ALB
+# Security Group Rule for Dispatcher to RabbitMQ
+resource "aws_security_group_rule" "dispatcher_to_rabbitmq" {
+  type                     = "ingress"
+  from_port                = 5672
+  to_port                  = 5672
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.rabbitmq.id
+  source_security_group_id = aws_security_group.dispatcher.id
+}
+
+# Security Group for ALB (unchanged)
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-sg"
   description = "Security group for RabbitMQ ALB"
@@ -262,7 +332,7 @@ resource "aws_security_group" "alb" {
     from_port   = 5672
     to_port     = 5672
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]  # Consider restricting this to known IP ranges
+    cidr_blocks = ["0.0.0.0/0"] # Consider restricting this to known IP ranges
   }
 
   egress {
@@ -271,4 +341,14 @@ resource "aws_security_group" "alb" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+}
+
+# Security Group Rule for ALB to RabbitMQ
+resource "aws_security_group_rule" "alb_to_rabbitmq" {
+  type                     = "ingress"
+  from_port                = 5672
+  to_port                  = 5672
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.rabbitmq.id
+  source_security_group_id = aws_security_group.alb.id
 }

@@ -7,13 +7,17 @@ terraform {
   }
 }
 
+locals {
+  environment = terraform.workspace
+}
+
 provider "aws" {
   region = var.aws_region
 }
 
 # Create ECR repository
 resource "aws_ecr_repository" "platform" {
-  name                 = "${var.environment}-platform"
+  name                 = "${local.environment}-platform"
   image_tag_mutability = "MUTABLE"
 
   image_scanning_configuration {
@@ -23,10 +27,10 @@ resource "aws_ecr_repository" "platform" {
 
 # Create AWS Secrets Manager secret for dispatcher config
 resource "aws_secretsmanager_secret" "dispatcher_config" {
-  name = "${var.environment}-dispatcher-config"
+  name = "${local.environment}-dispatcher-config"
 
   tags = {
-    Environment = var.environment
+    Environment = local.environment
     Service     = "dispatcher"
   }
 }
@@ -38,9 +42,9 @@ resource "aws_secretsmanager_secret_version" "dispatcher_config_version" {
 
 # Create AWS Secrets Manager secret for operator config
 resource "aws_secretsmanager_secret" "operator_config" {
-  name = "${var.environment}-operator-config"
+  name = "${local.environment}-operator-config"
   tags = {
-    Environment = var.environment
+    Environment = local.environment
     Service     = "operator"
   }
 }
@@ -71,8 +75,4 @@ output "operator_secret_arn" {
 variable "aws_region" {
   description = "The AWS region to create resources in"
   default     = "us-east-1"
-}
-
-variable "environment" {
-  description = "The environment (e.g., staging, production)"
 }
