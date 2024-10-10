@@ -1,0 +1,119 @@
+version: '3'
+vars:
+  TAG:
+    sh: echo "$(date +'%Y-%m-%d-%H:%M')-$(git rev-parse  HEAD)"
+
+tasks:
+  fetch-ecr-arn:
+    internal: true
+    cmds:
+      - |
+        ECR_ARN=$(aws secretsmanager get-secret-value --secret-id ECR_ARN_SECRET --query SecretString --output text)
+        echo "::set-output name=ECR_ARN::$ECR_ARN"
+
+  ecr:login:
+    desc: |
+      Logs into ECR for AWS
+    vars:
+      ECR_ARN:
+        sh: task fetch-ecr-arn | awk -F'"' '{print $4}'
+    cmds:
+      - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin {{ .ECR_ARN }}
+
+   manual:dispatcher:apply:staging:
+    desc: Deploy with a manually specified tag
+    cmds:
+      - task: ecr:login
+      - task: dispatcher:docker:staging
+        vars:
+          TAG: '{{.CLI_ARGS}}'
+      - task: dispatcher:terraform:staging
+        vars:
+          TAG: '{{.CLI_ARGS}}'
+
+  auto:dispatcher:apply:staging:
+    desc: |
+      Deploys the staging environment
+    cmds:
+      - task: ecr:login
+      - task: dispatcher:docker:staging
+      - task: dispatcher:terraform:staging
+  
+  dispatcher:docker:staging:
+    desc: |
+      Deploys the staging environment
+    vars:
+      ECR_ARN:
+        sh: task fetch-ecr-arn | awk -F'"' '{print $4}'
+    cmds:
+      - docker build -f docker/Dockerfile.dispatcher -t{{ .ECR_ARN }}:dispatcher-{{ .TAG }} .
+      - docker push {{ .ECR_ARN }}:dispatcher-{{ .TAG }}
+  
+  dispatcher:terraform:staging:
+    desc: |
+      Deploys the staging environment
+    dir: infra
+    vars:
+      ECR_ARN:
+        sh: task fetch-ecr-arn | awk -F'"' '{print $4}'
+    cmds:
+      - terraform init
+      - terraform apply -var-file=staging.tfvars -var="my_ip=74.73.53.146" -var="dispatcher-image"{{ .ECR_ARN }}" -var="dispatcher-image-tag=dispatcher-{{ .TAG }}" -auto-approve
+  
+  operator:apply:staging:
+    desc: |
+      Deploys the staging environment
+    cmds:
+      - task: ecr:login
+      - task: operator:docker:staging
+
+  operator:docker:staging:
+    desc: |
+      Deploys the staging environment
+    vars:
+      ECR_ARN:
+        sh: task fetch-ecr-arn | awk -F'"' '{print $4}'
+    cmds:
+      - docker build -f docker/Dockerfile.operator -t {{ .ECR_ARN }}:operator-{{ .TAG }} .
+      - docker push {{ .ECR_ARN }}:operator-{{ .TAG }}
+
+
+  manual:rabbitmq:apply:staging:
+    desc: Deploy with a manually specified tag
+    cmds:
+      - task: ecr:login
+      - task: rabbitmq:docker:staging
+        vars:
+          TAG: '{{.CLI_ARGS}}'
+      - task: rabbitmq:terraform:staging
+        vars:
+          TAG: '{{.CLI_ARGS}}'
+
+  auto:rabbitmq:apply:staging:
+    desc: |
+      Deploys the staging environment
+    cmds:
+      - task: ecr:login
+      - task: rabbitmq:docker:staging
+      - task: rabbitmq:terraform:staging
+
+  rabbitmq:docker:staging:
+    desc: |
+      Deploys the staging environment
+    vars:
+      ECR_ARN:
+        sh: task fetch-ecr-arn | awk -F'"' '{print $4}'
+    cmds:
+      - docker build -f docker/Dockerfile.rabbitmq -t {{ .ECR_ARN }}:rabbitmq-{{ .TAG }} .
+      - docker push {{ .ECR_ARN }}:rabbitmq-{{ .TAG }}
+
+  rabbitmq:terraform:staging:
+    desc: |
+      Deploys the staging environment
+    vars:
+      ECR_ARN:
+        sh: task fetch-ecr-arn | awk -F'"' '{print $4}'
+    dir: infra
+    cmds:
+      - terraform init
+      - terraform apply -var-file=staging.tfvars -var="my_ip=74.73.53.146" -var="{{ .ECR_ARN }}" -var="rabbitmq-image-tag=rabbitmq-{{ .TAG }}" -auto-approve
